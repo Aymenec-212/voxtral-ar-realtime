@@ -36,7 +36,15 @@ ENV = {
 }
 
 
-@app.function(image=image, volumes={MODELS_DIR: volume}, timeout=60 * MINUTES, env=ENV)
+@app.function(
+    image=image,
+    volumes={MODELS_DIR: volume},
+    timeout=60 * MINUTES,
+    env=ENV,
+    # The default fraction of a core starves the high-performance HF downloader.
+    cpu=2,
+    memory=4096,
+)
 def download_weights() -> None:
     """CPU-only: fill the volume once so GPU time is never spent downloading."""
     from voxtral_rt.config import Settings

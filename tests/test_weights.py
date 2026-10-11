@@ -33,6 +33,8 @@ def test_downloads_once_then_marker_makes_it_a_noop(monkeypatch, tmp_path):
     assert calls[0]["repo_id"] == REPO
     assert calls[0]["revision"] == "rev1"
     assert "assets/*" in calls[0]["ignore_patterns"]
+    assert "model.safetensors" in calls[0]["ignore_patterns"]
+    assert not any("consolidated" in pattern for pattern in calls[0]["ignore_patterns"])
 
 
 def test_a_new_revision_downloads_again(monkeypatch, tmp_path):

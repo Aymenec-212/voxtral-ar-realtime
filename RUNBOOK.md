@@ -52,8 +52,10 @@ time (until [ "$(curl -s -o /dev/null -w '%{http_code}' $URL/health)" = 200 ]; d
 
 **Paste back, from the `modal serve` logs:**
 - the vLLM banner line that prints its version (`INFO ... vLLM API server version 0.31.0`)
-- the line(s) that say which weight file vLLM loaded: look for `Loading weights`,
-  `consolidated.safetensors` or `model.safetensors`, and `Loading weights took ... seconds`
+- the line(s) that say which weight file vLLM loaded: look for `Loading weights` and
+  `Loading weights took ... seconds`. Expected: it mentions `consolidated.safetensors` (the
+  Mistral format). If it mentions `model.safetensors` instead, say so: that file is no longer
+  downloaded and the boot would have failed.
 - the lines with `model weights take ... GiB`, `GPU KV cache size`, and `Maximum concurrency for`
 - a line containing `Route: /v1/realtime` (proves the realtime endpoint is registered)
 - every `WARNING` and `ERROR` line (paste them all, even if they look harmless)
@@ -99,17 +101,17 @@ to try.
 
 - **Image build fails on `uv: not found`.** Edit `docker/Dockerfile`, replace the `RUN` line
   with `RUN python3 -m pip install --no-deps --no-cache-dir .` and retry A1.
-- **Modal complains it cannot find Python or pip in the image.** Add `add_python="3.12"` to
-  `modal.Image.from_dockerfile(...)` in `deploy/modal_app.py`. Report it: it changes which
-  Python runs our launcher and we may need to adjust the `CMD`.
+- **A1 fails with `RevisionNotFoundError`.** The pinned `MODEL_REVISION` may have moved on the
+  Hub. Report it verbatim; do not change the pin yourself.
 - **vLLM exits with a tokenizer error.** `--tokenizer-mode mistral` is already passed; paste
   the traceback.
-- **CUDA out of memory.** Add `"VLLM_EXTRA_ARGS": "--max-model-len 32768"` to `ENV` in
-  `deploy/modal_app.py` (the default context is 131072 tokens, about 3 hours of audio).
+- **CUDA out of memory, or "not enough KV cache for one sequence".** The engine already
+  passes `--max-model-len 16384`. Lower it further with `"VLLM_EXTRA_ARGS": "--max-model-len
+  8192"` in `ENV` (later flags win) and paste the memory lines from the log.
 - **Boot is very slow (compilation).** Add `"VLLM_EXTRA_ARGS": "--enforce-eager"` to `ENV`.
-  Boot gets faster, inference slower. The vLLM recipe for this model family instead uses
-  `--compilation_config '{"cudagraph_mode": "PIECEWISE"}'` with `VLLM_DISABLE_COMPILE_CACHE=1`;
-  that is the second thing to try.
+  Boot gets faster, inference slower. The `cudagraph_mode: PIECEWISE` flag from the vLLM recipe
+  is not needed on v0.31.0: the Voxtral realtime model only rejects pure `FULL` CUDA graphs and
+  the default `FULL_AND_PIECEWISE` is allowed.
 - **`/health` is 200 but the WebSocket fails (client prints `[closed]` or a 4xx).** Paste the
   client error and the Modal log. The likely cause is the `@app.server` decorator not proxying
   WebSockets; the fallback is `@app.function` + `@modal.web_server(8000)`, which the agent will
@@ -119,7 +121,7 @@ to try.
 
 ## After checkpoint A, the agent will
 
-- narrow `ensure_weights` to the one weight format vLLM loads (halves the download)
+- confirm from the logs that vLLM loaded `consolidated.safetensors`, the only format we download
 - bake any flag that proved necessary into `engine.py` as a default
 - write the checkpoint B steps (browser session, four parallel clients, time-limit behaviour)
 

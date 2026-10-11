@@ -10,9 +10,12 @@ from huggingface_hub import snapshot_download
 log = logging.getLogger("voxtral_rt.weights")
 
 MARKER = ".complete"
-# The repo also ships demo images and a sample WAV under assets/; vLLM never reads them.
-# Until checkpoint A tells us which weight format vLLM loads, both formats are downloaded.
-IGNORE_PATTERNS = ["assets/*"]
+# vLLM v0.31.0 loads the Mistral-format weights whenever consolidated*.safetensors exists
+# (load_format "auto", model_loader/default_loader.py) and reads params.json for the same repos
+# (config_format "auto", transformers_utils/config.py), so the Hugging Face-format
+# model.safetensors is never read: skipping it saves ~9 GB. The small JSON files and
+# tekken.json stay. assets/ holds demo images and a sample WAV that vLLM never opens.
+IGNORE_PATTERNS = ["assets/*", "model.safetensors"]
 
 
 def ensure_weights(repo_id: str, revision: str, root: Path) -> Path:

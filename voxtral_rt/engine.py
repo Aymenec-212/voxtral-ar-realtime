@@ -53,6 +53,12 @@ class Engine:
             # (vLLM recipe for Voxtral-Mini-4B-Realtime-2602).
             "--tokenizer-mode",
             "mistral",
+            # The model's default context is 131072 tokens; next to ~9 GB of weights on a 24 GB
+            # L4 the KV cache cannot hold one such sequence and vLLM refuses to start. 16384
+            # tokens (~80 ms of audio each) covers MAX_SESSION_SECONDS=300 with a wide margin.
+            "--max-model-len",
+            "16384",
+            # Last, so VLLM_EXTRA_ARGS can override any default above.
             *shlex.split(s.vllm_extra_args),
         ]
 
