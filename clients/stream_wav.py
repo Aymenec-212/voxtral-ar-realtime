@@ -63,6 +63,8 @@ async def run(url: str, pcm: bytes, chunk_ms: int, realtime: bool) -> int:
                     print(event["text"], end="", flush=True)
                 elif event["type"] == "final":
                     print(f"\n[final] {event['text']}")
+                    if "metrics" in event:
+                        print(f"[metrics] {json.dumps(event['metrics'])}", file=sys.stderr)
                 elif event["type"] == "error":
                     print(f"\n[error] {event['code']}: {event['message']}", file=sys.stderr)
                     if event["code"] != "time_limit":

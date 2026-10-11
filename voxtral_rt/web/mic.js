@@ -5,6 +5,7 @@ const stopBtn = document.getElementById("stop");
 const tokenInput = document.getElementById("token");
 const statusEl = document.getElementById("status");
 const captionsEl = document.getElementById("captions");
+const metricsEl = document.getElementById("metrics");
 const errorEl = document.getElementById("error");
 
 let ws = null;
@@ -13,6 +14,21 @@ let mediaStream = null;
 let workletNode = null;
 
 function setStatus(text) { statusEl.textContent = text; }
+
+// Lag and first-text include the model's built-in ~480 ms transcription delay.
+function showMetrics(m, finished) {
+  if (!m) { metricsEl.textContent = ""; return; }
+  const parts = [`lag ${Math.round(m.lag_ms)} ms`, `${m.tokens_per_s.toFixed(1)} tok/s`];
+  if (m.first_text_ms !== null) parts.push(`first text ${Math.round(m.first_text_ms)} ms`);
+  if (finished) {
+    parts.length = 0;
+    parts.push(`${m.audio_received_s.toFixed(1)} s audio`, `${m.tokens} tokens`,
+      `max lag ${Math.round(m.max_lag_ms)} ms`);
+    if (m.first_text_ms !== null) parts.push(`first text ${Math.round(m.first_text_ms)} ms`);
+    if (m.finalize_ms !== null) parts.push(`finalize ${Math.round(m.finalize_ms)} ms`);
+  }
+  metricsEl.textContent = parts.join(" · ");
+}
 function showError(text) { errorEl.textContent = text; }
 
 function transcribeUrl() {
@@ -27,6 +43,7 @@ async function start() {
   showError("");
   captionsEl.textContent = "";
   captionsEl.classList.remove("final");
+  showMetrics(null);
   setStatus("Connecting…");
   try {
     await openSocket();
@@ -48,9 +65,11 @@ function openSocket() {
       const msg = JSON.parse(event.data);
       if (msg.type === "ready") { ready = true; resolve(); }
       else if (msg.type === "delta") captionsEl.textContent += msg.text;
+      else if (msg.type === "metrics") showMetrics(msg, false);
       else if (msg.type === "final") {
         captionsEl.textContent = msg.text;
         captionsEl.classList.add("final");
+        showMetrics(msg.metrics, true);
         setStatus("Done.");
       } else if (msg.type === "error") {
         showError(`${msg.code}: ${msg.message}`);

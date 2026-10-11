@@ -38,11 +38,13 @@ def test_argv_contains_model_dir_name_host_and_extra_args():
 async def test_wait_until_ready_succeeds_against_a_live_health_endpoint(fake, tmp_path):
     settings = replace(Settings.from_env({}), upstream_url=fake.url)
     engine = Engine(settings, tmp_path, executable=SLEEPER)
+    assert engine.boot_seconds is None
     engine.start()
     try:
         await asyncio.to_thread(engine.wait_until_ready, 5.0, 0.05)
     finally:
         engine.stop()
+    assert engine.boot_seconds is not None and 0 <= engine.boot_seconds < 5
 
 
 def test_wait_until_ready_fails_fast_when_the_process_exits(tmp_path):

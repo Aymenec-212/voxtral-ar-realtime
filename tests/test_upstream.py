@@ -21,6 +21,7 @@ async def test_handshake_order_then_deltas_then_final(fake):
 
     assert [type(e) for e in events] == [Delta, Delta, Final]
     assert events[-1].text == "".join(e.text for e in events[:-1])
+    assert (events[-1].prompt_tokens, events[-1].completion_tokens) == (6, 2)
 
     kinds = [e["type"] for e in fake.received]
     assert kinds[:2] == ["session.update", "input_audio_buffer.commit"]
@@ -44,7 +45,7 @@ async def test_empty_audio_is_skipped(fake):
         await session.send_audio(b"")
         await session.finish()
         events = await collect(session)
-    assert events == [Final("")]
+    assert events == [Final("", prompt_tokens=0, completion_tokens=0)]
     assert not [e for e in fake.received if e["type"] == "input_audio_buffer.append"]
 
 
@@ -54,7 +55,7 @@ async def test_finish_is_idempotent(fake):
         await session.finish()
         await session.finish()
         events = await collect(session)
-    assert events == [Final("")]
+    assert events == [Final("", prompt_tokens=1, completion_tokens=0)]
     commits = [e for e in fake.received if e["type"] == "input_audio_buffer.commit"]
     finals = [e for e in commits if e.get("final")]
     assert len(finals) == 1
