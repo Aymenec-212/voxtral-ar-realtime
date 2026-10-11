@@ -16,6 +16,14 @@ You also need `ffmpeg` on your laptop to convert a sample clip (see A3).
 
 ---
 
+## What the first run established (11 Oct 2026)
+
+vLLM v0.31.0 accepted every flag, resolved the architecture `VoxtralRealtimeGeneration`,
+inferred the Mistral format from `consolidated*.safetensors`, loaded the weights in 6.9 s, and
+the model takes 8.43 GiB of GPU memory. Container start to the vLLM banner took about a minute.
+It then crashed in `profile_run` because the base image lacks vLLM's `audio` extra (see "If
+something breaks"); the image now installs it and fails the build if it is missing.
+
 ## Checkpoint A: smoke test
 
 ### A1. Fill the weights volume (CPU only, no GPU time)
@@ -62,28 +70,29 @@ time (until [ "$(curl -s -o /dev/null -w '%{http_code}' $URL/health)" = 200 ]; d
 - the `voxtral_rt.engine INFO engine is ready` line
 - the `real` time from the `until` loop above (that is cold start to first `/health` 200)
 
-### A3. Stream a real clip
+### A3. Speak into the page
 
-Make a 16 kHz mono PCM16 WAV from any short Arabic or Darija recording (10 to 30 seconds):
+Open the URL in Chrome, press **Start**, allow the microphone, speak a few sentences of Arabic or
+Darija, press **Stop**. Captions should appear while you speak, then the final transcript
+replaces them and the status reads "Done.".
+
+**Paste back:**
+- whether captions appeared while speaking, and roughly how far behind your speech they were
+- the final transcript and one sentence on whether it is right
+- anything in the red error line under the captions, verbatim
+- the browser console (F12 → Console) if anything is red
+- any `WARNING`/`ERROR` lines that appeared in the `modal serve` logs during the session
+
+### A4. Optional: stream a WAV file
+
+Useful to measure time to first delta without a microphone in the loop.
 
 ```bash
 ffmpeg -i my_clip.m4a -ac 1 -ar 16000 -sample_fmt s16 sample.wav
 python clients/stream_wav.py --url wss://<host from the URL above>/v1/transcribe --wav sample.wav
 ```
 
-The client streams at real-time pace, prints deltas as they arrive, then `[final] ...`.
-
-**Paste back:**
-- the full client output (stderr included: it has `[first delta after X.XXs]` and `[done in ...]`)
-- one sentence on whether the transcript is right
-- any `WARNING`/`ERROR` lines that appeared in the `modal serve` logs during the stream
-
-### A4. Open the page
-
-Open the URL in a browser, press Start, say a sentence, press Stop. This is optional for
-checkpoint A; checkpoint B does it properly.
-
-**Paste back:** whether captions appeared, and the browser console errors if any.
+**Paste back:** the full client output (stderr included: it has `[first delta after X.XXs]`).
 
 ### A5. Scale to zero
 
@@ -99,6 +108,15 @@ confirm that no container is running after a minute or two.
 Paste the error verbatim; these are the failures the agent anticipates, with the first thing
 to try.
 
+- **vLLM dies in `profile_run` with `ImportError: soundfile is not installed`.** This is the
+  checkpoint A failure. The `vllm/vllm-openai` image ships vLLM without its `audio` extra; the
+  Dockerfile now installs it (`av scipy soundfile soxr mistral_common[audio]`) and the image
+  build fails on CPU if any of them is missing, so this cannot reach a GPU again. If you still
+  see it, the running container is on a stale image: rebuild with
+  `MODAL_FORCE_BUILD=1 modal serve deploy/modal_app.py`.
+- **The container exits right after `voxtral_rt exited with code N during startup`.** That is
+  intended: the Modal server now stops as soon as the launcher dies instead of waiting 20 minutes
+  for port 8000. The real error is a few lines above it in the log; paste those.
 - **Image build fails on `uv: not found`.** Edit `docker/Dockerfile`, replace the `RUN` line
   with `RUN python3 -m pip install --no-deps --no-cache-dir .` and retry A1.
 - **A1 fails with `RevisionNotFoundError`.** The pinned `MODEL_REVISION` may have moved on the

@@ -5,6 +5,15 @@ FROM vllm/vllm-openai:v0.31.0
 # The base entrypoint runs `vllm serve`; Modal needs an entrypoint that execs "$@".
 ENTRYPOINT []
 ENV PYTHONUNBUFFERED=1 HF_XET_HIGH_PERFORMANCE=1
+# The base ships vLLM without its "audio" extra, so Voxtral's profile run dies on a billed GPU with
+# "soundfile is not installed". Install it under a freeze of the base's pins; fail the build if missing.
+RUN uv pip freeze --system | grep -E '^[A-Za-z0-9_.-]+==' > /tmp/constraints.txt \
+ && uv pip install --system --no-cache -c /tmp/constraints.txt \
+      av scipy soundfile soxr "mistral_common[audio]" \
+ && python3 -c "import av, scipy, soundfile, soxr; \
+from mistral_common.imports import assert_soundfile_installed, assert_soxr_installed; \
+assert_soundfile_installed(); assert_soxr_installed()" \
+ && rm /tmp/constraints.txt
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY voxtral_rt ./voxtral_rt
