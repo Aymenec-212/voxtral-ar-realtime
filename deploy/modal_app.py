@@ -9,7 +9,9 @@ Pinned to modal==1.6.1 (see pyproject.toml). Set VOXTRAL_IMAGE to a published im
 """
 
 import os
+import socket
 import subprocess
+import time
 from pathlib import Path
 
 import modal
@@ -82,6 +84,7 @@ class Server:
     @modal.enter()
     def start(self) -> None:
         self.process = subprocess.Popen(["python3", "-m", "voxtral_rt"])
+        wait_until_listening(self.process, PORT)
 
     @modal.exit()
     def stop(self) -> None:
@@ -90,3 +93,20 @@ class Server:
             self.process.wait(timeout=60)
         except subprocess.TimeoutExpired:
             self.process.kill()
+
+
+def wait_until_listening(process: subprocess.Popen, port: int, poll_s: float = 1.0) -> None:
+    """Block until `port` accepts a TCP connection, or raise as soon as `process` exits.
+
+    Without this, a launcher that dies during boot leaves Modal waiting for the port until
+    startup_timeout: 20 minutes of billed GPU for nothing. Raising tears the container down now.
+    """
+    while True:
+        code = process.poll()
+        if code is not None:
+            raise RuntimeError(f"voxtral_rt exited with code {code} during startup")
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=1.0):
+                return
+        except OSError:
+            time.sleep(poll_s)
