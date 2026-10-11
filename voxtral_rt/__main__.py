@@ -24,7 +24,8 @@ def main() -> None:
             engine.stop()
             raise
     try:
-        uvicorn.run(create_app(settings), host="0.0.0.0", port=settings.port, log_level="info")
+        app = create_app(settings, engine_boot_s=engine.boot_seconds if engine else None)
+        uvicorn.run(app, host="0.0.0.0", port=settings.port, log_level="info")
     finally:
         if engine is not None:
             engine.stop()

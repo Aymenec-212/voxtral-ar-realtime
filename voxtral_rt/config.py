@@ -57,6 +57,14 @@ class Settings:
     @property
     def engine_health_url(self) -> str:
         """The engine's HTTP health URL, derived from the realtime URL (same host and port)."""
+        return self._engine_http("/health")
+
+    @property
+    def engine_metrics_url(self) -> str:
+        """vLLM's Prometheus endpoint, same host and port as the realtime URL."""
+        return self._engine_http("/metrics")
+
+    def _engine_http(self, path: str) -> str:
         parts = urlsplit(self.engine_url)
         scheme = "https" if parts.scheme == "wss" else "http"
-        return urlunsplit((scheme, parts.netloc, "/health", "", ""))
+        return urlunsplit((scheme, parts.netloc, path, "", ""))

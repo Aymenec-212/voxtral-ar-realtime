@@ -8,6 +8,7 @@ import pytest
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 
+import voxtral_rt.gateway as gateway_module
 from tests.conftest import free_port, serve_app
 from tests.fake_vllm import FakeVLLM
 from voxtral_rt.config import Settings
@@ -27,12 +28,14 @@ async def recv(ws) -> dict:
     return json.loads(await ws.recv())
 
 
-async def drain(ws) -> tuple[list[dict], int]:
-    """Collect every remaining message and the close code."""
+async def drain(ws, keep_metrics: bool = False) -> tuple[list[dict], int]:
+    """Collect every remaining message and the close code (periodic metrics ticks dropped)."""
     events = []
     try:
         while True:
-            events.append(await recv(ws))
+            event = await recv(ws)
+            if keep_metrics or event["type"] != "metrics":
+                events.append(event)
     except ConnectionClosed as exc:
         return events, exc.rcvd.code if exc.rcvd else -1
 
@@ -54,6 +57,11 @@ async def test_happy_path(fake):
     assert [e["type"] for e in events] == ["delta", "delta", "final"]
     assert events[-1]["text"] == "".join(e["text"] for e in events[:-1])
     assert close_code == 1000
+    final_metrics = events[-1]["metrics"]
+    assert final_metrics["tokens"] == 2
+    assert final_metrics["audio_received_s"] == round(6 * len(PCM) / 32000, 2)
+    assert final_metrics["prompt_tokens"] == 6 and final_metrics["completion_tokens"] == 2
+    assert final_metrics["finalize_ms"] is not None and final_metrics["first_text_ms"] is not None
 
 
 async def test_auth_off_ignores_token(fake):
@@ -203,3 +211,91 @@ async def test_demo_page_and_static_files_are_served(fake):
         assert "/static/mic.js" in page.text
         for name in ("mic.js", "pcm-worklet.js"):
             assert (await http.get(f"/static/{name}")).status_code == 200
+
+
+async def test_metrics_events_stream_during_the_session(fake, monkeypatch):
+    monkeypatch.setattr(gateway_module, "METRICS_INTERVAL_S", 0.05)
+    fake.empty_deltas = True  # like vLLM: a delta per token, text or not
+    async with gateway(fake) as gw, connect(f"{gw.ws}/v1/transcribe") as ws:
+        assert await recv(ws) == {"type": "ready"}
+        for _ in range(6):
+            await ws.send(PCM)
+            await asyncio.sleep(0.03)
+        await asyncio.sleep(0.2)
+        await ws.send(json.dumps({"type": "stop"}))
+        events, close_code = await drain(ws, keep_metrics=True)
+
+    ticks = [e for e in events if e["type"] == "metrics"]
+    assert len(ticks) >= 2
+    assert {"lag_ms", "tokens", "tokens_per_s", "first_text_ms", "audio_received_s"} <= set(
+        ticks[-1]
+    )
+    assert ticks[-1]["tokens"] == 6  # four empty deltas and two with text
+    final = events[-1]
+    assert final["type"] == "final" and final["metrics"]["tokens"] == 6
+    assert final["metrics"]["completion_tokens"] == 6
+    assert close_code == 1000
+
+
+async def test_server_metrics_stream_is_sse_with_engine_numbers(fake, monkeypatch):
+    monkeypatch.setattr(gateway_module, "METRICS_INTERVAL_S", 0.05)
+    async with gateway(fake, max_sessions=3) as gw:
+        # One finished session and one busy refusal give the counters something to show.
+        async with connect(f"{gw.ws}/v1/transcribe") as ws:
+            assert await recv(ws) == {"type": "ready"}
+            for _ in range(3):
+                await ws.send(PCM)
+            await ws.send(json.dumps({"type": "stop"}))
+            await drain(ws)
+        async with (
+            httpx.AsyncClient(base_url=gw.http, timeout=5) as http,
+            http.stream("GET", "/v1/metrics/stream") as response,
+        ):
+            assert response.status_code == 200
+            assert response.headers["content-type"].startswith("text/event-stream")
+            lines = []
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    lines.append(json.loads(line[len("data: ") :]))
+                if len(lines) == 3:
+                    break
+    snap = lines[-1]
+    assert snap["active_sessions"] == 0 and snap["max_sessions"] == 3
+    assert snap["sessions_completed"] == 1
+    assert snap["errors"] == {"busy": 0, "time_limit": 0, "bad_request": 0, "upstream_error": 0}
+    assert snap["recent_sessions"] == 1
+    assert snap["first_text_ms_p50"] is not None and snap["finalize_ms_p95"] is not None
+    engine = snap["engine"]
+    assert engine["reachable"] is True
+    assert engine["boot_s"] is None  # UPSTREAM_URL mode: no launcher measured a boot
+    assert engine["requests_running"] == 0 and engine["requests_waiting"] == 0
+    assert engine["kv_cache_usage_pct"] == 0.0
+    assert engine["generation_tokens_per_s"] == 0.0  # the counter did not move between scrapes
+
+
+async def test_server_metrics_stream_requires_the_token_when_api_key_is_set(fake):
+    async with gateway(fake, api_key="s3cret") as gw, httpx.AsyncClient(base_url=gw.http) as http:
+        assert (await http.get("/v1/metrics/stream")).status_code == 401
+        async with http.stream("GET", "/v1/metrics/stream?token=s3cret") as response:
+            assert response.status_code == 200
+
+
+async def test_errors_are_counted_in_server_metrics(fake, monkeypatch):
+    monkeypatch.setattr(gateway_module, "METRICS_INTERVAL_S", 0.05)
+    fake.error_after_deltas = 1
+    async with gateway(fake) as gw:
+        async with connect(f"{gw.ws}/v1/transcribe") as ws:
+            assert await recv(ws) == {"type": "ready"}
+            for _ in range(3):
+                await ws.send(PCM)
+            await drain(ws)
+        async with (
+            httpx.AsyncClient(base_url=gw.http, timeout=5) as http,
+            http.stream("GET", "/v1/metrics/stream") as response,
+        ):
+            async for line in response.aiter_lines():
+                if line.startswith("data: "):
+                    snap = json.loads(line[len("data: ") :])
+                    break
+    assert snap["errors"]["upstream_error"] == 1
+    assert snap["sessions_completed"] == 0

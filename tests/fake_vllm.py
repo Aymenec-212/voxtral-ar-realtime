@@ -18,6 +18,7 @@ import json
 import time
 
 from fastapi import FastAPI, WebSocket
+from fastapi.responses import PlainTextResponse
 from starlette.websockets import WebSocketDisconnect, WebSocketState
 
 DEFAULT_MODEL = "mistralai/Voxtral-Mini-4B-Realtime-Arabic"
@@ -32,16 +33,36 @@ class FakeVLLM:
         # Test switches: after this many deltas, send an error event / close the socket.
         self.error_after_deltas: int | None = None
         self.drop_after_deltas: int | None = None
+        # Like vLLM, send a delta for every "token" even when it carries no text.
+        self.empty_deltas = False
+        self.generated_tokens = 0  # feeds the fake /metrics counter
+        self.generating = 0
         # Every client event, in arrival order, so tests can assert on protocol order.
         self.received: list[dict] = []
         self.connections = 0
         self.active = 0
         self.app = FastAPI()
         self.app.add_api_route("/health", self._health, methods=["GET"])
+        self.app.add_api_route("/metrics", self._metrics, methods=["GET"])
         self.app.add_api_websocket_route("/v1/realtime", self._realtime)
 
     async def _health(self) -> dict:
         return {}
+
+    async def _metrics(self) -> PlainTextResponse:
+        """The subset of vLLM's Prometheus exposition that the gateway reads, same names."""
+        labels = f'{{engine="0",model_name="{self.model}"}}'
+        lines = [
+            "# TYPE vllm:num_requests_running gauge",
+            f"vllm:num_requests_running{labels} {self.generating}.0",
+            "# TYPE vllm:num_requests_waiting gauge",
+            f"vllm:num_requests_waiting{labels} 0.0",
+            "# TYPE vllm:kv_cache_usage_perc gauge",
+            f"vllm:kv_cache_usage_perc{labels} {0.05 * self.generating}",
+            "# TYPE vllm:generation_tokens_total counter",
+            f"vllm:generation_tokens_total{labels} {self.generated_tokens}.0",
+        ]
+        return PlainTextResponse("\n".join(lines) + "\n")
 
     async def _realtime(self, websocket: WebSocket) -> None:
         self.connections += 1
@@ -119,17 +140,31 @@ class _Connection:
             await self._error(f"Unknown event type: {kind}", "unknown_event")
 
     async def _generate(self) -> None:
+        self.fake.generating += 1
+        try:
+            await self._generate_until_final()
+        finally:
+            self.fake.generating -= 1
+
+    async def _generate_until_final(self) -> None:
         text = ""
         chunks = 0
-        deltas = 0
+        deltas = 0  # text-bearing deltas
+        tokens = 0  # every delta sent, empty ones included
         while True:
             chunk = await self.queue.get()
             if chunk is None:
                 break
             chunks += 1
             if chunks % self.fake.chunks_per_delta:
+                if self.fake.empty_deltas:
+                    tokens += 1
+                    self.fake.generated_tokens += 1
+                    await self._send({"type": "transcription.delta", "delta": ""})
                 continue
             deltas += 1
+            tokens += 1
+            self.fake.generated_tokens += 1
             delta = f"كلمة{deltas} "
             text += delta
             await self._send({"type": "transcription.delta", "delta": delta})
@@ -141,8 +176,8 @@ class _Connection:
                 return
         usage = {
             "prompt_tokens": chunks,
-            "completion_tokens": deltas,
-            "total_tokens": chunks + deltas,
+            "completion_tokens": tokens,
+            "total_tokens": chunks + tokens,
         }
         await self._send({"type": "transcription.done", "text": text, "usage": usage})
         while not self.queue.empty():

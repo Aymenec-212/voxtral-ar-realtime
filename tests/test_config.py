@@ -12,6 +12,7 @@ def test_defaults_when_env_is_empty():
     assert s.api_key is None
     assert s.engine_url == "ws://127.0.0.1:8001/v1/realtime"
     assert s.engine_health_url == "http://127.0.0.1:8001/health"
+    assert s.engine_metrics_url == "http://127.0.0.1:8001/metrics"
 
 
 def test_env_overrides_and_upstream_url_disables_engine():

@@ -27,6 +27,9 @@ class Delta:
 @dataclass(frozen=True)
 class Final:
     text: str
+    # From vLLM's usage block; None when the engine did not report them.
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
 
 
 class UpstreamError(Exception):
@@ -86,7 +89,12 @@ class UpstreamSession:
                 if kind == "transcription.delta":
                     yield Delta(event.get("delta", ""))
                 elif kind == "transcription.done":
-                    yield Final(event.get("text", ""))
+                    usage = event.get("usage") or {}
+                    yield Final(
+                        event.get("text", ""),
+                        prompt_tokens=_maybe_int(usage.get("prompt_tokens")),
+                        completion_tokens=_maybe_int(usage.get("completion_tokens")),
+                    )
                     return
                 elif kind == "error":
                     raise UpstreamError(event.get("code") or "unknown", event.get("error", ""))
@@ -118,3 +126,7 @@ def _parse(raw: str | bytes) -> dict:
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise UpstreamError("protocol", "upstream sent a non-JSON frame") from exc
     return event if isinstance(event, dict) else {}
+
+
+def _maybe_int(value: object) -> int | None:
+    return int(value) if isinstance(value, int | float) else None

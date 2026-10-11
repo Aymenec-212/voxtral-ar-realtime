@@ -34,6 +34,8 @@ class Engine:
         self._executable = tuple(executable)  # tests swap in a dummy command
         self._stop_grace_s = stop_grace_s
         self._process: subprocess.Popen | None = None
+        self._started_at: float | None = None
+        self.boot_seconds: float | None = None  # start() -> /health answered
 
     @property
     def argv(self) -> list[str]:
@@ -64,6 +66,7 @@ class Engine:
 
     def start(self) -> None:
         log.info("starting engine: %s", shlex.join(self.argv))
+        self._started_at = time.monotonic()
         self._process = subprocess.Popen(self.argv)
 
     def wait_until_ready(self, timeout_s: float, poll_s: float = 1.0) -> None:
@@ -76,7 +79,8 @@ class Engine:
             if code is not None:
                 raise EngineError(f"vllm exited with code {code} before becoming ready")
             if health_ok(self._settings.engine_health_url):
-                log.info("engine is ready")
+                self.boot_seconds = round(time.monotonic() - (self._started_at or deadline), 1)
+                log.info("engine is ready after %.1fs", self.boot_seconds)
                 return
             if time.monotonic() >= deadline:
                 self.stop()
