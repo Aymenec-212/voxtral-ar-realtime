@@ -29,7 +29,10 @@ def test_argv_contains_model_dir_name_host_and_extra_args():
     assert argv[argv.index("--port") + 1] == "8001"
     assert argv[argv.index("--served-model-name") + 1] == settings.model_id
     assert argv[argv.index("--tokenizer-mode") + 1] == "mistral"
+    assert argv[argv.index("--max-model-len") + 1] == "16384"
+    # Extra args come last so they can override the defaults (vLLM takes the last value).
     assert argv[-3:] == ["--enforce-eager", "--max-model-len", "4096"]
+    assert argv.index("--max-model-len") < argv.index("--enforce-eager")
 
 
 async def test_wait_until_ready_succeeds_against_a_live_health_endpoint(fake, tmp_path):

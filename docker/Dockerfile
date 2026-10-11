@@ -8,6 +8,9 @@ ENV PYTHONUNBUFFERED=1 HF_XET_HIGH_PERFORMANCE=1
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY voxtral_rt ./voxtral_rt
+# The base ships python3.12 and pip but may have no unversioned `python`, which Modal's
+# runtime can expect. Harmless for plain `docker run` users.
+RUN ln -sf /usr/bin/python3 /usr/local/bin/python
 # --no-deps: everything we need already ships with vLLM; never touch its pins.
 # The base image manages its packages with `uv pip install --system`, so we do the same.
 RUN uv pip install --system --no-deps --no-cache .
