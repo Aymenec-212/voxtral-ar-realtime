@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voxtral-rt"
+version = "0.1.0"
+description = "Realtime Arabic speech-to-text gateway around vLLM serving Voxtral-Mini-4B-Realtime-Arabic"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.12"
+# All four already ship in the vllm/vllm-openai image; the Dockerfile installs
+# this package with --no-deps so vLLM's own pins are never touched.
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "websockets",
+    "huggingface_hub",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "httpx",
+    "ruff",
+    # Pinned: Modal's API moves fast and deploy/modal_app.py targets this version.
+    "modal==1.6.1",
+]
+
+[tool.setuptools]
+packages = ["voxtral_rt"]
+
+[tool.setuptools.package-data]
+voxtral_rt = ["web/*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

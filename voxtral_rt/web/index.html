@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Voxtral Arabic Realtime</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body { max-width: 720px; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+    h1 { font-size: 1.4rem; margin-bottom: 0.25rem; }
+    .muted { opacity: 0.7; font-size: 0.9rem; }
+    .row { display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap; margin: 1rem 0; }
+    button { font: inherit; padding: 0.5rem 1.25rem; border-radius: 6px; border: 1px solid #8884; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    input { font: inherit; padding: 0.45rem 0.6rem; border-radius: 6px; border: 1px solid #8884; min-width: 14rem; }
+    #status { min-height: 1.5rem; }
+    #captions {
+      direction: rtl; text-align: right; font-size: 1.6rem; line-height: 1.8;
+      min-height: 8rem; padding: 1rem; border: 1px solid #8884; border-radius: 8px;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    #captions.final { border-color: #4a4; }
+    #error { color: #c33; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>Voxtral Arabic Realtime</h1>
+  <p class="muted">Press Start, speak Arabic or Darija, and watch the captions. Press Stop to get the final transcript.</p>
+
+  <div class="row">
+    <button id="start">Start</button>
+    <button id="stop" disabled>Stop</button>
+    <input id="token" type="password" placeholder="API key (only if the server requires one)" autocomplete="off">
+  </div>
+
+  <div id="status" class="muted">Idle.</div>
+  <div id="captions" lang="ar"></div>
+  <div id="error"></div>
+
+  <script src="/static/mic.js"></script>
+</body>
+</html>
