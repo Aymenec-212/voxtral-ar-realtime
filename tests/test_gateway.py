@@ -69,16 +69,48 @@ async def test_auth_off_ignores_token(fake):
         assert await recv(ws) == {"type": "ready"}
 
 
-async def test_auth_on_rejects_wrong_or_missing_token(fake):
-    async with gateway(fake, api_key="s3cret") as gw:
-        for url in (f"{gw.ws}/v1/transcribe", f"{gw.ws}/v1/transcribe?token=nope"):
-            async with connect(url) as ws:
-                events, close_code = await drain(ws)
-            assert events == []
-            assert close_code == 1008
-        async with connect(f"{gw.ws}/v1/transcribe?token=s3cret") as ws:
-            assert await recv(ws) == {"type": "ready"}
-    assert fake.connections == 1
+BAD_TOKENS = ["", "?token=", "?token=nope", "?token=s3cre", "?token=%C3%A9"]
+BAD_TOKEN_IDS = ["no-token", "empty", "wrong", "prefix", "non-ascii"]
+
+
+@pytest.mark.parametrize("query", BAD_TOKENS, ids=BAD_TOKEN_IDS)
+async def test_transcribe_rejects_a_missing_or_wrong_token_with_1008(fake, query):
+    async with (
+        gateway(fake, api_key="s3cret") as gw,
+        connect(f"{gw.ws}/v1/transcribe{query}") as ws,
+    ):
+        events, close_code = await drain(ws)
+    assert events == []
+    assert close_code == 1008
+    assert fake.connections == 0  # rejected before any engine work
+
+
+async def test_transcribe_accepts_the_right_token(fake):
+    async with (
+        gateway(fake, api_key="s3cret") as gw,
+        connect(f"{gw.ws}/v1/transcribe?token=s3cret") as ws,
+    ):
+        assert await recv(ws) == {"type": "ready"}
+        for _ in range(3):
+            await ws.send(PCM)
+        await ws.send(json.dumps({"type": "stop"}))
+        events, close_code = await drain(ws)
+    assert events[-1]["type"] == "final"
+    assert close_code == 1000
+
+
+@pytest.mark.parametrize("query", BAD_TOKENS, ids=BAD_TOKEN_IDS)
+async def test_metrics_stream_rejects_a_missing_or_wrong_token_with_401(fake, query):
+    async with gateway(fake, api_key="s3cret") as gw, httpx.AsyncClient(base_url=gw.http) as http:
+        response = await http.get(f"/v1/metrics/stream{query}")
+    assert response.status_code == 401
+    assert response.json() == {"error": "unauthorized"}
+
+
+async def test_public_routes_need_no_token(fake):
+    async with gateway(fake, api_key="s3cret") as gw, httpx.AsyncClient(base_url=gw.http) as http:
+        assert (await http.get("/")).status_code == 200
+        assert (await http.get("/health")).status_code == 200
 
 
 async def test_busy_when_max_sessions_reached(fake):
@@ -273,11 +305,17 @@ async def test_server_metrics_stream_is_sse_with_engine_numbers(fake, monkeypatc
     assert engine["generation_tokens_per_s"] == 0.0  # the counter did not move between scrapes
 
 
-async def test_server_metrics_stream_requires_the_token_when_api_key_is_set(fake):
-    async with gateway(fake, api_key="s3cret") as gw, httpx.AsyncClient(base_url=gw.http) as http:
-        assert (await http.get("/v1/metrics/stream")).status_code == 401
-        async with http.stream("GET", "/v1/metrics/stream?token=s3cret") as response:
-            assert response.status_code == 200
+async def test_metrics_stream_accepts_the_right_token(fake):
+    async with (
+        gateway(fake, api_key="s3cret") as gw,
+        httpx.AsyncClient(base_url=gw.http, timeout=5) as http,
+        http.stream("GET", "/v1/metrics/stream?token=s3cret") as response,
+    ):
+        assert response.status_code == 200
+        async for line in response.aiter_lines():
+            if line.startswith("data: "):
+                assert "active_sessions" in json.loads(line[len("data: ") :])
+                break
 
 
 async def test_errors_are_counted_in_server_metrics(fake, monkeypatch):
