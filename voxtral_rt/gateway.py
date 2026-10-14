@@ -10,6 +10,10 @@ codes are `busy` (1013), `time_limit` (1000, after a final), `bad_request` (1003
 
 GET /v1/metrics/stream is Server-Sent Events: one self-contained JSON snapshot of the whole
 server (metrics.ServerMetrics plus vLLM's own counters) about once a second.
+
+When API_KEY is set, both /v1/transcribe and /v1/metrics/stream require `?token=<key>`
+(browsers cannot set headers on a WebSocket); a missing or wrong token closes the WebSocket
+with 1008 and answers the stream with 401. GET / and GET /health stay public.
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import secrets
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
@@ -92,7 +97,7 @@ def create_app(
 
     @app.get("/v1/metrics/stream")
     async def metrics_stream(request: Request, token: str | None = None) -> StreamingResponse:
-        if settings.api_key and token != settings.api_key:
+        if not _authorized(settings.api_key, token):
             return JSONResponse({"error": "unauthorized"}, status_code=401)
 
         async def events() -> AsyncIterator[str]:
@@ -108,7 +113,7 @@ def create_app(
     @app.websocket("/v1/transcribe")
     async def transcribe(ws: WebSocket, token: str | None = None) -> None:
         await ws.accept()
-        if settings.api_key and token != settings.api_key:
+        if not _authorized(settings.api_key, token):
             await ws.close(code=1008)
             return
         try:
@@ -119,6 +124,16 @@ def create_app(
             await _fail(ws, "busy", "too many active sessions, retry later", 1013)
 
     return app
+
+
+def _authorized(api_key: str | None, token: str | None) -> bool:
+    """Check the `?token=` query parameter; no API_KEY configured means the API is open."""
+    if not api_key:
+        return True
+    if token is None:
+        return False
+    # Constant time, on bytes so a non-ASCII token is a mismatch rather than a TypeError.
+    return secrets.compare_digest(token.encode(), api_key.encode())
 
 
 class _ClientGone(Exception):

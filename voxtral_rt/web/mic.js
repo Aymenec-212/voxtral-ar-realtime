@@ -78,7 +78,7 @@ function openSocket() {
     };
     ws.onerror = () => { if (!ready) reject(new Error("WebSocket connection failed")); };
     ws.onclose = (event) => {
-      if (!ready) reject(new Error(event.code === 1008 ? "Unauthorized: wrong API key" : `Connection closed (${event.code})`));
+      if (!ready) reject(new Error(event.code === 1008 ? "Unauthorized: check the API key" : `Connection closed (${event.code})`));
       teardown();
     };
   });

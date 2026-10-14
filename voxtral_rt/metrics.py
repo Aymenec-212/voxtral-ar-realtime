@@ -12,7 +12,7 @@ from collections.abc import Callable
 
 # One output token per streaming step of 1000 / frame_rate ms of audio: VoxtralRealtimeBuffer
 # yields `num_tokens = step / raw_audio_length_per_tok` per step (voxtral_realtime.py, vLLM
-# v0.31.0); the model's tekken.json sets frame_rate 12.5, i.e. 80 ms, and checkpoint A measured
+# v0.31.0); the model's tekken.json sets frame_rate 12.5, i.e. 80 ms, and an L4 run measured
 # exactly 12.5 tokens/s while audio streamed in real time.
 SECONDS_PER_TOKEN = 0.08
 # The model emits its first token only after transcription_delay_ms (480 ms = 6 frames) of
